@@ -1,0 +1,5 @@
+include: [index.html]
+exclude: [build, main, managed_components, components, sdkconfig, CMakeLists.txt, dependencies.lock, .devcontainer, .vscode, .clangd, .gitignore]
+show_downloads: false
+google_analytics:
+theme: none
