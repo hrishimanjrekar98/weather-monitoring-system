@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Weather Analytics</title>
+    
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        :root {
+            --bg-base: #0a0b0d;
+            --bg-surface: #141619;
+            --bg-card: #1c1f24;
+            --text-main: #e6e8ea;
+            --text-muted: #8e9499;
+            --color-temp: #00d2ff;
+            --color-hum: #00ff88;
+            --color-aqi-safe: #00ff88;
+            --color-aqi-warn: #ffcc00;
+            --color-aqi-crit: #ff3333;
+            --border-ui: #2d3139;
+        }
+
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, system-ui, sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            display: flex;
+            flex-direction: column;
+            padding: 12px;
+            box-sizing: border-box;
+        }
+
+        /* HEADER */
+        .header {
+            flex: 0 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px 15px 12px;
+            border-bottom: 1px solid var(--border-ui);
+            margin-bottom: 15px;
+        }
+
+        .header h1 { margin: 0; font-size: 1.4rem; font-weight: 700; letter-spacing: -0.5px; }
+        .status { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 0.8rem; background: #1a1d21; padding: 6px 12px; border-radius: 20px; border: 1px solid var(--border-ui); }
+        .led { width: 8px; height: 8px; border-radius: 50%; background-color: #333; transition: all 0.3s; }
+
+        /* MAIN CONTENT AREA */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            min-height: 0;
+            margin-bottom: 12px;
+        }
+
+        /* CARDS */
+        .cards-row {
+            display: flex;
+            gap: 12px;
+            flex: 0 0 auto;
+        }
+
+        .card {
+            flex: 1;
+            background-color: var(--bg-card);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            border-left: 4px solid #333;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::after {
+            content: "";
+            position: absolute;
+            right: -10px;
+            bottom: -10px;
+            font-family: "Font Awesome 6 Free";
+            font-weight: 900;
+            font-size: 4rem;
+            opacity: 0.05;
+        }
+
+        #card-temp { border-left-color: var(--color-temp); }
+        #card-temp::after { content: "\f2c9"; color: var(--color-temp); }
+        
+        #card-hum { border-left-color: var(--color-hum); }
+        #card-hum::after { content: "\f043"; color: var(--color-hum); }
+
+        #card-aqi { border-left-color: var(--color-aqi-safe); }
+        #card-aqi::after { content: "\f75b"; color: var(--color-aqi-safe); }
+
+        .card-label { font-size: 0.75rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; margin-bottom: 4px; }
+        .card-value { font-size: 2.2rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; }
+        .card-status { font-size: 0.7rem; font-weight: 700; margin-top: 4px; letter-spacing: 0.5px; }
+
+        /* CHARTS */
+        .charts-row {
+            display: flex;
+            gap: 12px;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .chart-wrapper {
+            flex: 1;
+            background-color: var(--bg-surface);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--border-ui);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+        }
+
+        .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .chart-title { font-size: 0.8rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; }
+        .chart-container { flex: 1; position: relative; min-height: 0; }
+
+        /* LOG PANEL */
+        .log-panel {
+            flex: 0 0 220px;
+            background-color: #000;
+            border-radius: 12px;
+            padding: 12px;
+            border: 1px solid var(--border-ui);
+            display: flex;
+            flex-direction: column;
+            box-sizing: border-box;
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 0 4px;
+        }
+
+        .log-panel h3 { margin: 0; font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+        
+        .log-controls { display: flex; gap: 8px; }
+
+        .btn {
+            background: #1c1f24;
+            color: var(--text-main);
+            border: 1px solid var(--border-ui);
+            padding: 5px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.7rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .btn:hover { background: #2d3139; border-color: #4d535e; }
+        .btn-export { background: #007bff; border-color: #007bff; }
+        .btn-export:hover { background: #0069d9; }
+
+        .log-terminal { 
+            flex: 1; 
+            overflow-y: auto; 
+            font-family: 'JetBrains Mono', 'Consolas', monospace; 
+            font-size: 0.75rem; 
+            padding: 4px;
+            border-top: 1px solid #111;
+        }
+
+        .log-row { margin-bottom: 2px; padding: 4px; border-radius: 4px; display: flex; align-items: flex-start; }
+        .log-row:nth-child(even) { background: #050505; }
+        .t-date { color: #444; margin-right: 8px; font-weight: 600; font-size: 0.65rem; flex: 0 0 auto; }
+        .t-time { color: #666; margin-right: 12px; font-weight: 700; flex: 0 0 auto; }
+        .c-crit { color: var(--color-aqi-crit); font-weight: bold; }
+        .c-warn { color: var(--color-aqi-warn); }
+        .c-data { color: var(--color-hum); }
+        .c-raw { color: #666; font-style: italic; opacity: 0.8; }
+        .c-info { color: var(--color-temp); }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>WEATHER ANALYTICS <span style="color:var(--text-muted); font-weight:300;">| REAL-TIME</span></h1>
+        <div class="status">
+            <div class="led" id="conn-led"></div>
+            <span id="conn-text" style="opacity:0.8;">DISCONNECTED</span>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="cards-row">
+            <div class="card" id="card-temp">
+                <div class="card-label">Air Temperature</div>
+                <div class="card-value" id="val-temp">--.-°C</div>
+                <div class="card-status" id="stat-temp" style="color:var(--color-temp)">SYSTEM NOMINAL</div>
+            </div>
+
+            <div class="card" id="card-hum">
+                <div class="card-label">Relative Humidity</div>
+                <div class="card-value" id="val-hum">--.-%</div>
+                <div class="card-status" id="stat-hum" style="color:var(--color-hum)">OPTIMAL RANGE</div>
+            </div>
+
+            <div class="card" id="card-aqi">
+                <div class="card-label">Air Quality Index</div>
+                <div class="card-value" id="val-aqi">----</div>
+                <div class="status-text card-status" id="status-aqi" style="color:var(--color-aqi-safe)">CLEAN AIR</div>
+            </div>
+        </div>
+
+        <div class="charts-row">
+            <div class="chart-wrapper">
+                <div class="chart-header">
+                    <div class="chart-title">Thermal Trend</div>
+                    <div style="font-size: 0.6rem; color: var(--color-temp);">LIVE °C</div>
+                </div>
+                <div class="chart-container"><canvas id="ch-temp"></canvas></div>
+            </div>
+            <div class="chart-wrapper">
+                <div class="chart-header">
+                    <div class="chart-title">Hygrometric Trend</div>
+                    <div style="font-size: 0.6rem; color: var(--color-hum);">LIVE %</div>
+                </div>
+                <div class="chart-container"><canvas id="ch-hum"></canvas></div>
+            </div>
+            <div class="chart-wrapper">
+                <div class="chart-header">
+                    <div class="chart-title">AQI Concentration</div>
+                    <div style="font-size: 0.6rem; color: var(--color-aqi-warn);">LIVE PPM</div>
+                </div>
+                <div class="chart-container"><canvas id="ch-aqi"></canvas></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="log-panel">
+        <div class="log-header">
+            <h3>Telemetry Historian</h3>
+            <div class="log-controls">
+                <button class="btn btn-export" onclick="exportCSV()"><i class="fas fa-download"></i> Export CSV</button>
+                <button class="btn" onclick="clearLog()">Clear</button>
+            </div>
+        </div>
+        <div class="log-terminal" id="terminal"></div>
+    </div>
+
+    <script>
+        let historyData = []; 
+        const MAX_PTS = 50;
+        let lastState = "SAFE";
+
+        // Helper to get separate Date and Time strings
+        function getDateTimeParts(date) {
+            const pad = (num) => String(num).padStart(2, '0');
+            const y = date.getFullYear();
+            const m = pad(date.getMonth() + 1);
+            const d = pad(date.getDate());
+            const hh = pad(date.getHours());
+            const mm = pad(date.getMinutes());
+            const ss = pad(date.getSeconds());
+            return {
+                date: `${y}-${m}-${d}`,
+                time: `${hh}:${mm}:${ss}`
+            };
+        }
+
+        // Industry Standard Chart Colors & Gradients
+        const COLORS = {
+            temp: { border: '#00d2ff', bg: 'rgba(0, 210, 255, 0.15)' },
+            hum:  { border: '#00ff88', bg: 'rgba(0, 255, 136, 0.15)' },
+            aqi:  { border: '#ffcc00', bg: 'rgba(255, 204, 0, 0.15)' }
+        };
+
+        function getGradient(ctx, color) {
+            const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+            gradient.addColorStop(0, color);
+            gradient.addColorStop(0.6, 'rgba(0,0,0,0)');
+            return gradient;
+        }
+
+        function makeConfig(label, colorSet, yLabel, yMin, yMax) {
+            return {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: label,
+                        data: [],
+                        borderColor: colorSet.border,
+                        backgroundColor: (context) => {
+                            const chart = context.chart;
+                            const {ctx, chartArea} = chart;
+                            if (!chartArea) return null;
+                            return getGradient(ctx, colorSet.bg);
+                        },
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        pointHoverRadius: 5,
+                        pointHoverBackgroundColor: colorSet.border,
+                        pointHoverBorderColor: '#fff',
+                        pointHoverBorderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 0 },
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(28, 31, 36, 0.9)',
+                            titleFont: { size: 11, weight: 'bold' },
+                            bodyFont: { size: 13, weight: '800' },
+                            padding: 12,
+                            borderColor: varToHex('--border-ui'),
+                            borderWidth: 1,
+                            displayColors: false,
+                            callbacks: {
+                                label: (context) => ` ${context.parsed.y} ${yLabel}`
+                            }
+                        }
+                    },
+                    scales: { 
+                        x: { 
+                            display: false,
+                        }, 
+                        y: { 
+                            suggestedMin: yMin, 
+                            suggestedMax: yMax,
+                            grid: {
+                                color: 'rgba(255,255,255,0.03)',
+                                drawBorder: false
+                            },
+                            ticks: { 
+                                color: '#555',
+                                font: { size: 10, family: 'JetBrains Mono' },
+                                padding: 10,
+                                maxTicksLimit: 6
+                            }
+                        } 
+                    }
+                }
+            };
+        }
+
+        function varToHex(varName) {
+            return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+        }
+
+        const chartTemp = new Chart(document.getElementById('ch-temp').getContext('2d'), makeConfig('Temp', COLORS.temp, '°C', 10, 40));
+        const chartHum = new Chart(document.getElementById('ch-hum').getContext('2d'), makeConfig('Humidity', COLORS.hum, '%', 0, 100));
+        const chartAqi = new Chart(document.getElementById('ch-aqi').getContext('2d'), makeConfig('AQI', COLORS.aqi, 'PPM', 0, 2500));
+
+        function addLog(level, msg) {
+            const term = document.getElementById('terminal');
+            const parts = getDateTimeParts(new Date());
+            let cls = '';
+            
+            switch(level) {
+                case 'CRIT': cls = 'c-crit'; break;
+                case 'WARN': cls = 'c-warn'; break;
+                case 'DATA': cls = 'c-data'; break;
+                case 'RAW':  cls = 'c-raw';  break;
+                default: cls = 'c-info';
+            }
+
+            const row = document.createElement('div');
+            row.className = 'log-row';
+            row.innerHTML = `<span class="t-date">${parts.date}</span><span class="t-time">${parts.time}</span><span class="${cls}">[${level}] ${msg}</span>`;
+            
+            term.appendChild(row);
+            term.scrollTop = term.scrollHeight;
+            if (term.children.length > 200) term.removeChild(term.firstChild);
+        }
+
+        function clearLog() {
+            document.getElementById('terminal').innerHTML = '';
+            addLog("INFO", "Telemetry buffer reset.");
+        }
+
+        function exportCSV() {
+            if (historyData.length === 0) { alert("No session telemetry available."); return; }
+            let csv = "Date,Time,Temp_Celsius,Humidity_Percent,AQI_PPM\n";
+            historyData.forEach(r => { csv += `${r.date},${r.time},${r.temp},${r.hum},${r.aqi}\n`; });
+            const link = document.createElement("a");
+            link.setAttribute("href", encodeURI("data:text/csv;charset=utf-8," + csv));
+            link.setAttribute("download", `telemetry_export_${Date.now()}.csv`);
+            link.click();
+        }
+
+        function updateUI(t, h, a) {
+            const timeLabel = new Date().toLocaleTimeString([], { hour12: false });
+            const parts = getDateTimeParts(new Date());
+            
+            historyData.push({ date: parts.date, time: parts.time, temp: t, hum: h, aqi: a });
+
+            document.getElementById('val-temp').innerText = t.toFixed(1) + '°C';
+            document.getElementById('val-hum').innerText = h.toFixed(1) + '%';
+            document.getElementById('val-aqi').innerText = a;
+
+            const cAqi = document.getElementById('card-aqi');
+            const sAqi = document.getElementById('status-aqi');
+            let state = "SAFE";
+
+            if (a > 2000) state = "CRIT";
+            else if (a > 1000) state = "WARN";
+
+            if (state === "CRIT") {
+                cAqi.style.borderLeftColor = 'var(--color-aqi-crit)';
+                sAqi.style.color = 'var(--color-aqi-crit)';
+                sAqi.innerText = 'HAZARDOUS BREACH';
+            } else if (state === "WARN") {
+                cAqi.style.borderLeftColor = 'var(--color-aqi-warn)';
+                sAqi.style.color = 'var(--color-aqi-warn)';
+                sAqi.innerText = 'ELEVATED LEVELS';
+            } else {
+                cAqi.style.borderLeftColor = 'var(--color-aqi-safe)';
+                sAqi.style.color = 'var(--color-aqi-safe)';
+                sAqi.innerText = 'ATMOSPHERE NOMINAL';
+            }
+
+            if (state !== lastState) {
+                if (state === "CRIT") addLog("CRIT", "Critical atmospheric alert triggered.");
+                else if (state === "WARN") addLog("WARN", "Atmospheric warning issued.");
+                else addLog("INFO", "Recovery: Atmosphere back to nominal.");
+                lastState = state;
+            }
+
+            [chartTemp, chartHum, chartAqi].forEach(c => {
+                c.data.labels.push(timeLabel);
+                if (c.data.labels.length > MAX_PTS) c.data.labels.shift();
+            });
+            chartTemp.data.datasets[0].data.push(t);
+            chartHum.data.datasets[0].data.push(h);
+            chartAqi.data.datasets[0].data.push(a);
+            
+            [chartTemp, chartHum, chartAqi].forEach(c => {
+                if (c.data.datasets[0].data.length > MAX_PTS) c.data.datasets[0].data.shift();
+                c.update('none'); 
+            });
+        }
+
+        // --- MQTT CONNECTION ---
+        const client = mqtt.connect('wss://bfc1544d121142dd8c36774c1e7a7e14.s1.eu.hivemq.cloud:8884/mqtt', {
+            username: 'esp32_mqtt',
+            password: 'Testmqtt123',
+            clientId: 'analytics_' + Math.random().toString(16).substr(2, 8)
+        });
+
+        client.on('connect', () => {
+            const led = document.getElementById('conn-led');
+            led.style.backgroundColor = 'var(--color-aqi-safe)';
+            led.style.boxShadow = '0 0 12px var(--color-aqi-safe)';
+            document.getElementById('conn-text').innerText = 'ENCRYPTED LINK ACTIVE';
+            addLog("INFO", "Channel established. Initializing telemetry stream...");
+            client.subscribe('weather/data');
+        });
+
+        client.on('message', (topic, msg) => {
+            const raw = msg.toString();
+            try {
+                const p = JSON.parse(raw);
+                if (p.temperature !== undefined && p.humidity !== undefined && p.aqi !== undefined) {
+                    updateUI(p.temperature, p.humidity, p.aqi);
+                }
+            } catch (e) {
+                addLog("RAW", `Packet ignored: ${raw}`);
+            }
+        });
+    </script>
+</body>
+</html>
